@@ -1,3 +1,4 @@
+import argparse
 from itertools import cycle
 import cv2
 
@@ -6,9 +7,14 @@ from src.model import YOLO_detect, YOLO_pose
 
 def main():
 
-    camera = Webcam(mirror=False, camera_index=1)
+    parser = argparse.ArgumentParser(description='Object Detection with YOLO')
+    parser.add_argument('-c', '--camera-index', type=int, default=0, help='Camera index (default: 0)')
+    parser.add_argument('-l', '--language', type=str, default='en', help='Language (default: en)')
+    args = parser.parse_args()
+
+    camera = Webcam(mirror=False, camera_index=args.camera_index)
     models = [
-        YOLO_detect("models/yolo11n.pt"),
+        YOLO_detect("models/yolo11n.pt", language=args.language),
         YOLO_pose("models/yolo11n-pose.pt")
     ]
     model_cycle = cycle(models)
