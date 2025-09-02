@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
+from itertools import cycle
+import logging
 
 import cv2
 import numpy as np
 import ultralytics
 import translate
-import logging
+
+import matplotlib as mpl
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +71,7 @@ class YOLO_detect(Model):
         if hasattr(self.model, 'names') and self.model.names:
             class_labels = self.model.names.values()
 
-            if language:
+            if language and language != 'en':
                 LOGGER.info(f'Translating labels to {language} ...')
                 translator = translate.Translator(to_lang=language, from_lang='en')
                 class_labels = [translator.translate(lbl) for lbl in class_labels]
@@ -97,6 +100,7 @@ class YOLO_pose(Model):
         self.color = (0, 0, 255)
         self.radius = 5
         self.thickness = 5
+        self.colors = [(int(r*255), int(g*255), int(b*255)) for r,g,b in mpl.color_sequences['tab20']] 
 
 
     def predict(self, image: np.ndarray) -> np.ndarray:
@@ -105,18 +109,22 @@ class YOLO_pose(Model):
         for result in results:
 
             keypoints = result.keypoints.data.cpu().numpy()
-            assert keypoints.shape == (1, 17, 3), "Wrong assumption about keypoints shape"
 
-            X = keypoints[0, :, 0].astype(int)
-            Y = keypoints[0, :, 1].astype(int)
-            conf = keypoints[0, :, 2]
+            # we get multiple keypoints if more than one person is visible 
+            for i, kpts in enumerate(keypoints):
+                color = self.colors[i % 10]
+                assert kpts.shape == (17, 3), "Wrong assumption about keypoints shape"
 
-            for x, y, c in zip(X, Y, conf):
-                if c > self.threshold:
-                    cv2.circle(image, (x, y), self.radius, self.color, -1)
+                X = kpts[:, 0].astype(int)
+                Y = kpts[:, 1].astype(int)
+                conf = kpts[:, 2]
 
-            for i, j in self.lines.values():
-                if conf[i] > self.threshold and conf[j] > self.threshold:
-                    cv2.line(image, (X[i], Y[i]), (X[j], Y[j]), color=self.color, thickness=self.thickness)
+                for x, y, c in zip(X, Y, conf):
+                    if c > self.threshold:
+                        cv2.circle(image, (x, y), self.radius, color, -1)
+
+                for i, j in self.lines.values():
+                    if conf[i] > self.threshold and conf[j] > self.threshold:
+                        cv2.line(image, (X[i], Y[i]), (X[j], Y[j]), color=color, thickness=self.thickness)
 
         return image
