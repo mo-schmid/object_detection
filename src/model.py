@@ -13,7 +13,7 @@ class Model(ABC):
     def predict(self, image: np.ndarray) -> np.ndarray:
         return
 
-class YOLO_detect():
+class YOLO_detect(Model):
     def __init__(self, checkpoint: str ="yolo11n.pt", threshold: float = 0.5, language: str = None):
         self.model = ultralytics.YOLO(checkpoint)
         self.threshold = threshold
@@ -24,23 +24,23 @@ class YOLO_detect():
 
         results = self.model(image)
         for result in results:
-            boxes = result.boxes.xyxy.cpu().numpy() if hasattr(result.boxes, 'xyxy') else []
-            confs = result.boxes.conf.cpu().numpy() if hasattr(result.boxes, 'conf') else []
-            clss = result.boxes.cls.cpu().numpy() if hasattr(result.boxes, 'cls') else []
+            boxes = result.boxes.xyxy.cpu().numpy().astype(int)
+            clss = result.boxes.cls.cpu().numpy().astype(int)
+            confs = result.boxes.conf.cpu().numpy()
+
             for box, conf, cls in zip(boxes, confs, clss):
                 if conf > self.threshold:
-                    cls_idx = int(cls)
+                    color = self.color_lut[cls]
+                    label = self.cls_lut[cls]
+            
+                    pt1 = box[:2]
+                    pt2 = box[2:]
+                    cv2.rectangle(image, pt1, pt2, color=color, thickness=2)
 
-                    color = self.color_lut[cls_idx]
-                    label = self.cls_lut[cls_idx]
-              
-                    x1, y1, x2, y2 = map(int, box)
-
-                    cv2.rectangle(image, (x1, y1), (x2, y2), color=color, thickness=2)
                     cv2.putText(
                         image,
                         f"{label} {conf:.2f}",
-                        (x1, y1 - 10),
+                        (pt1[0], pt1[1] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1.5,
                         color=color,
@@ -63,7 +63,7 @@ class YOLO_detect():
                 colors.append(tuple(map(int, color_bgr)))
             return dict(zip(range(num_classes), colors))
         return {}
-    
+        
     def _create_cls_lut(self, language: str = None) -> dict:
         if hasattr(self.model, 'names') and self.model.names:
             class_labels = self.model.names.values()
@@ -76,3 +76,47 @@ class YOLO_detect():
         return dict(zip(range(len(class_labels)), class_labels))
 
 
+class YOLO_pose(Model):
+    def __init__(self, checkpoint: str ="yolo11n-pose.pt", threshold: float = 0.5, language: str = None):
+        self.model = ultralytics.YOLO(checkpoint)
+        self.threshold = threshold
+        self.lines = {
+            "shoulder": (5, 6),
+            "arm_upper_l": (5, 7),
+            "arm_lower_l": (7, 9),
+            "arm_upper_r": (6, 8),
+            "arm_lower_r": (8, 10),
+            "body_l": (5, 11),
+            "body_r": (6, 12),
+            "hips": (11, 12),
+            "leg_upper_l": (11, 13),
+            "leg_lower_l": (13, 15),
+            "leg_upper_r": (12, 14),
+            "leg_lower_r": (14, 16)
+        }
+        self.color = (0, 0, 255)
+        self.radius = 5
+        self.thickness = 5
+
+
+    def predict(self, image: np.ndarray) -> np.ndarray:
+
+        results = self.model(image)
+        for result in results:
+
+            keypoints = result.keypoints.data.cpu().numpy()
+            assert keypoints.shape == (1, 17, 3), "Wrong assumption about keypoints shape"
+
+            X = keypoints[0, :, 0].astype(int)
+            Y = keypoints[0, :, 1].astype(int)
+            conf = keypoints[0, :, 2]
+
+            for x, y, c in zip(X, Y, conf):
+                if c > self.threshold:
+                    cv2.circle(image, (x, y), self.radius, self.color, -1)
+
+            for i, j in self.lines.values():
+                if conf[i] > self.threshold and conf[j] > self.threshold:
+                    cv2.line(image, (X[i], Y[i]), (X[j], Y[j]), color=self.color, thickness=self.thickness)
+
+        return image
